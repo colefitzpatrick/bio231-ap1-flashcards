@@ -11,6 +11,8 @@ html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-sys
 .wrap{max-width:760px;margin:0 auto;padding:16px 16px 40px;}
 h1{font-size:20px;margin:6px 0 2px;}
 .sub{color:var(--muted);font-size:13px;margin-bottom:16px;}
+.offline-status{display:inline-block;color:var(--muted);font-size:12px;border:1px solid var(--border);border-radius:999px;padding:6px 10px;margin:0 0 14px;background:rgba(30,41,59,.7);}
+.offline-status.ready{color:#bbf7d0;border-color:rgba(34,197,94,.55);background:rgba(20,83,45,.24);}
 .module{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:12px;}
 .module h2{font-size:16px;margin:0 0 2px;}
 .module .msub{color:var(--muted);font-size:12px;margin-bottom:10px;}
@@ -54,6 +56,7 @@ button:disabled{opacity:.4;cursor:not-allowed;}
   <div id="home">
     <h1>BIO 231 &mdash; Anatomy &amp; Physiology I</h1>
     <div class="sub">Practice-bank flashcards &middot; tap a card to flip &middot; mark green/red &middot; your misses are saved on this device</div>
+    <div class="offline-status" id="offlineStatus">Offline cache: checking...</div>
     <div id="modules"></div>
     <button class="link" id="resetBtn">Reset all progress</button>
   </div>
@@ -209,6 +212,47 @@ document.addEventListener('keydown',e=>{
   else if(S.flipped && (e.key==='g'||e.key==='ArrowRight'||e.key==='1')) mark(true);
   else if(S.flipped && (e.key==='r'||e.key==='ArrowLeft'||e.key==='2')) mark(false);
 });
+function setOfflineStatus(text,ready){
+  const el=$('offlineStatus'); if(!el) return;
+  el.textContent=text;
+  el.className='offline-status'+(ready?' ready':'');
+}
+function offlineAssets(){
+  const urls=new Set(['./','./index.html','./service-worker.js']);
+  allCards().forEach(c=>{ if(c.img) urls.add(c.img); if(c.imgBack) urls.add(c.imgBack); });
+  return Array.from(urls);
+}
+function setupOfflineCache(){
+  if(!('serviceWorker' in navigator) || !('caches' in window)){
+    setOfflineStatus('Offline cache: not supported in this browser',false); return;
+  }
+  const urls=offlineAssets();
+  const controlled=!!navigator.serviceWorker.controller;
+  if(!navigator.onLine){ setOfflineStatus('Offline mode: saved cards and images are available',true); return; }
+  setOfflineStatus(controlled?'Offline ready: saved cards and images are available':'Offline cache: preparing '+urls.length+' files...',controlled);
+  const registrationReady=navigator.serviceWorker.getRegistration()
+    .then(reg=>reg||navigator.serviceWorker.register('./service-worker.js'))
+    .then(()=>navigator.serviceWorker.ready);
+  Promise.race([registrationReady,new Promise(resolve=>setTimeout(()=>resolve(null),6000))])
+    .then(reg=>new Promise(resolve=>{
+      if(!reg){ resolve({cached:controlled?urls.length:0,total:urls.length}); return; }
+      const worker=reg.active||reg.waiting||reg.installing;
+      if(!worker){ resolve({cached:0,total:urls.length}); return; }
+      const channel=new MessageChannel();
+      const timer=setTimeout(()=>resolve({cached:0,total:urls.length,timeout:true}),45000);
+      channel.port1.onmessage=e=>{ clearTimeout(timer); resolve(e.data||{}); };
+      worker.postMessage({type:'CACHE_URLS',urls:urls},[channel.port2]);
+    }))
+    .then(data=>{
+      const total=data.total||urls.length, cached=data.cached||0;
+      if(cached>=total) setOfflineStatus('Offline ready: '+cached+' files saved on this device',true);
+      else setOfflineStatus('Offline cache: saved '+cached+' of '+total+' files; keep this page open online once',false);
+    })
+    .catch(()=>setOfflineStatus(controlled?'Offline ready: saved cards and images are available':'Offline cache: open this page online once before the flight',controlled));
+}
+window.addEventListener('online',setupOfflineCache);
+window.addEventListener('offline',()=>setOfflineStatus('Offline mode: saved cards and images are available',true));
+setupOfflineCache();
 renderHome(); show('home');
 </script>
 </body>
