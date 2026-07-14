@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bio231-flashcards-v13';
+const CACHE_NAME = 'bio231-flashcards-v14';
 const CORE_ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', event => {
